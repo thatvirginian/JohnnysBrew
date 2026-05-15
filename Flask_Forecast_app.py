@@ -121,6 +121,12 @@ def build_grid_dataset():
 # ─────────────────────────────────────────────
 # ROUTES
 # ─────────────────────────────────────────────
+@app.route('/healthz')
+def health_check():
+    """Instant health check endpoint for Azure load balancer probes."""
+    return "OK", 200
+
+
 @app.route("/")
 def index():
     all_dates, matrix, _, _, daily_totals = build_grid_dataset()
