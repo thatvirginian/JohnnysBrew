@@ -40,8 +40,12 @@ ROUTE_LOOK_AHEAD_MAP = {
 
 def run_query(query, params=None):
     from src.database_setup import get_db_connection
+    engine = get_db_connection()
+    
     with engine.connect() as conn:
-        return pd.read_sql(text(query), conn, params=params)
+        # Wrap the query string in text() and add bindparams
+        stmt = text(query).bindparams(expanding=True)
+        return pd.read_sql(stmt, conn, params=params)
 
 
 # ─────────────────────────────────────────────
@@ -248,7 +252,7 @@ def export_excel():
     target_date_strs = [d.strftime("%Y-%m-%d") for d in target_dates]
 
     # 4. Parametrize connection args safely (using tuple for the SQL IN clause)
-    params = {"loc_id": str(loc_id), "target_dates": tuple(target_date_strs)}
+    params = {"loc_id": str(loc_id), "target_dates": list(target_date_strs)}
 
     # 5. Core Operational Batch Queries
     store_prep_query = """
@@ -303,4 +307,4 @@ def export_excel():
 
 
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=8000)
+    app.run(host="0.0.0.0", port=8080)
