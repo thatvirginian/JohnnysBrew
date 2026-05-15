@@ -12,7 +12,6 @@ app = Flask(__name__)
 def padding_filter(s, width=3):
     return s.rjust(width)
 
-engine = get_db_connection()
 
 # (Global Configuration Scope)
 ROUTE_LOOK_AHEAD_MAP = {
@@ -40,6 +39,7 @@ ROUTE_LOOK_AHEAD_MAP = {
 }
 
 def run_query(query, params=None):
+    from src.database_setup import get_db_connection
     with engine.connect() as conn:
         return pd.read_sql(text(query), conn, params=params)
 
