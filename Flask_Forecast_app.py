@@ -7,12 +7,14 @@ from sqlalchemy import text
 from src.database_setup import get_db_connection
 from src.excel_helper import get_excel_download_buffer
 
+
+
 app = Flask(__name__)
 @app.template_filter('padding')
 def padding_filter(s, width=3):
     return s.rjust(width)
 
-
+engine = get_db_connection()
 # (Global Configuration Scope)
 ROUTE_LOOK_AHEAD_MAP = {
     "North": {
@@ -39,9 +41,6 @@ ROUTE_LOOK_AHEAD_MAP = {
 }
 
 def run_query(query, params=None):
-    from src.database_setup import get_db_connection
-    engine = get_db_connection()
-    
     with engine.connect() as conn:
         # Wrap the query string in text() and add bindparams
         stmt = text(query).bindparams(expanding=True)
