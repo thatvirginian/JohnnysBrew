@@ -1,0 +1,76 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Anita's Logistics Grid</title>
+    <!-- Modern Core Script Dependencies -->
+    <script src="https://cdn.jsdelivr.net/npm/htmx.org@1.9.10"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        .grid-cols-15 { grid-template-columns: minmax(130px, 1fr) repeat(14, minmax(105px, 1fr)); }
+    </style>
+</head>
+<body class="bg-black text-gray-900 font-sans p-4">
+
+    <div class="max-w-[1850px] mx-auto bg-white rounded-lg shadow p-6">
+        <h1 class="text-2xl font-black tracking-tight mb-6">14-Day Future Orders Forecast</h1>
+
+        <!-- THE SCROLLABLE GRID PIPELINE -->
+        <div class="overflow-x-auto border border-gray-200 rounded">
+            <div class="grid grid-cols-15 min-w-[1600px]">
+
+                <!-- HEADER CELL MATRIX -->
+                <div class="bg-gray-800 text-white font-bold p-3 text-sm flex items-center">Store Location</div>
+                {% for date in all_dates %}
+                <div class="bg-gray-100 border-l border-gray-200 text-center py-2 text-xs font-black uppercase text-gray-700 tracking-wide">
+                    {{ date.strftime('%a %m/%d') }}
+                </div>
+                {% endfor %}
+
+                <!-- ROW CONTENT GENERATION -->
+                {% for row in matrix %}
+                    <!-- Location Name Column Tag -->
+                    <div class="p-3 text-xs font-bold border-t border-gray-200 flex items-center bg-gray-50 uppercase tracking-tight">
+                        {{ row.location }}
+                    </div>
+
+                    <!-- 14 Interactive Loop Cells -->
+                    {% for cell in row.cells %}
+                    <div class="border-t border-l border-gray-200 h-16">
+                        {% if cell.is_empty %}
+                            <button class="w-full h-full text-[11px] bg-black text-gray-400 opacity-40 font-semibold cursor-not-allowed text-center leading-tight transition" disabled>
+                                {{ row.location | title }}<br>AM: 0 | PM: 0<br>$0.00
+                            </button>
+                        {% else %}
+                            <!-- HTMX MAGIC BUTTON: Calls /drill-down on click, targets the #drill-container div below -->
+                            <button class="w-full h-full text-[11px] p-1 font-bold text-center leading-tight transition duration-150 {{ 'bg-[#FFF000] text-black' if cell.is_gold else 'bg-white text-gray-800' }} hover:bg-[#d3db3b] focus:bg-red-600 focus:text-white"
+                                    hx-get="/drill-down?location={{ row.location }}&date={{ cell.date_str }}"
+                                    hx-target="#drill-container"
+                                    hx-swap="innerHTML">
+                                {{ row.location | title }}<br>
+                                AM: {{ cell.am | string | padding(3) }} | PM: {{ cell.pm | string | padding(3) }}<br>
+                                ${{ "{:,.2f}".format(cell.rev) }}
+                            </button>
+                        {% endif %}
+                    </div>
+                    {% endfor %}
+                {% endfor %}
+
+                <!-- TOTALS ROW SUMMARY LAYER -->
+                <div class="bg-gray-900 text-white font-extrabold p-3 text-xs flex items-center uppercase tracking-wider">Daily Summary</div>
+                {% for day_total in daily_totals %}
+                <div class="border-l border-gray-300 p-1 text-center h-14 flex flex-col justify-center items-center font-bold text-[11px] {{ 'bg-[#FFF000] text-black' if day_total >= 10000 else 'bg-gray-100 text-gray-800' }}">
+                    Total Revenue<br><span class="text-xs font-black">${{ "{:,.2f}".format(day_total) }}</span>
+                </div>
+                {% endfor %}
+
+            </div>
+        </div>
+
+        <!-- ASYNCHRONOUS TARGET HOOK (DRILL DOWN LOADS HERE) -->
+        <div id="drill-container" class="mt-8"></div>
+
+    </div>
+
+</body>
+</html>

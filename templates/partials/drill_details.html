@@ -1,0 +1,86 @@
+<hr class="border-gray-200 my-4">
+
+<div class="flex justify-between items-end mb-4">
+    <h2 class="text-lg font-black tracking-tight text-gray-800">🔍 {{ location | title }} — {{ date }}</h2>
+
+    {% if export_disabled %}
+        <!-- LOCKED VARIANT: Disables actions and displays route warning tooltips -->
+        <button type="button"
+                class="bg-gray-300 text-gray-500 font-bold text-xs py-1.5 px-3 rounded shadow cursor-not-allowed inline-flex items-center"
+                title="Exports are restricted for the {{ route }} route on {{ day_name }}s.">
+            🔒 Export Restricted
+        </button>
+    {% else %}
+        <!-- ACTIVE VARIANT: Standard downloading link -->
+        <a href="/export?location={{ location }}&date={{ date }}"
+           class="bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs py-1.5 px-3 rounded shadow transition inline-flex items-center">
+            📥 Export Prep Sheet
+        </a>
+    {% endif %}
+</div>
+
+<!-- PREP SUMMARY BADGE CONTAINER -->
+{% if bb_badges or taco_badges %}
+<div class="bg-gray-50 border border-gray-200 rounded-lg p-4 mb-6">
+    <h3 class="text-sm font-black uppercase tracking-wider text-gray-500 mb-2">🌯 Daily Prep Totals</h3>
+
+    {% if bb_badges %}
+    <div class="mb-2 text-xs">
+        <span class="font-bold text-gray-700">BB Items:</span>
+        {% for badge in bb_badges %}
+        <span class="inline-block bg-gray-200 border border-gray-300 text-gray-800 rounded px-2 py-0.5 mx-0.5 font-bold">
+            {{ badge.item_name }}: {{ badge.quantity | int }}
+        </span>
+        {% endfor %}
+    </div>
+    {% endif %}
+
+    {% if taco_badges %}
+    <div class="text-xs">
+        <span class="font-bold text-gray-700">Taco Bar:</span>
+        {% for badge in taco_badges %}
+        <span class="inline-block bg-orange-100 border border-orange-200 text-orange-800 rounded px-2 py-0.5 mx-0.5 font-bold">
+            {{ badge.item_name }}: {{ badge.quantity | int }}
+        </span>
+        {% endfor %}
+    </div>
+    {% endif %}
+</div>
+{% endif %}
+
+<!-- INTERACTIVE EXPANDER WORKFLOW FOR DETAILED ORDER ROWS -->
+<div class="space-y-2">
+    {% for id, o in orders.items() %}
+    <details class="group border border-gray-200 rounded bg-white overflow-hidden transition">
+        <summary class="list-none flex justify-between items-center p-3 font-bold text-xs cursor-pointer bg-gray-50 hover:bg-gray-100 transition select-none">
+            <span class="tracking-tight text-gray-700">
+                ({{ o.time }}) ORDER {{ o.number }} — {{ o.customer.upper() }} —
+                <span class="{{ 'text-red-600' if o.is_high }}">${{ "{:,.2f}".format(o.total) }}</span>
+                {% if o.is_high %}⚠️ {% endif %}
+                {% if o.is_delivery %}<span class="text-blue-600 font-extrabold"> - 🚚 DELIVERY</span>{% endif %}
+            </span>
+            <!-- Toggle Animation Arrow icon -->
+            <span class="transition group-open:rotate-180 text-gray-400">&darr;</span>
+        </summary>
+
+        <div class="p-4 border-t border-gray-100 space-y-3 bg-white text-xs">
+            {% if o.is_high %}
+            <div class="p-3 bg-red-50 text-red-800 font-bold border border-red-200 rounded">
+                High Value Order: ${{ "{:,.2f}".format(o.total) }} — Verify production capacity.
+            </div>
+            {% endif %}
+
+            {% for item in o['items'] %}
+            <div class="pl-2">
+                <p class="font-bold text-gray-900">{{ item.quantity | int }} — {{ item.item_name }}</p>
+                {% if item.mods and item.mods not in ["", "None", "nan"] %}
+                <p class="text-gray-500 italic pl-3 mt-0.5">↳ {{ item.mods }}</p>
+                {% endif %}
+            </div>
+            {% endfor %}
+        </div>
+    </details>
+    {% else %}
+    <p class="text-sm text-gray-500 italic">No active catering items scheduled for this selection block.</p>
+    {% endfor %}
+</div>
