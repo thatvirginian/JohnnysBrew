@@ -2,7 +2,7 @@ import io
 from datetime import datetime, timedelta
 from flask import Flask, render_template, request, Response
 import pandas as pd
-from sqlalchemy import text
+from sqlalchemy import text, bindparam
 
 from src.database_setup import get_db_connection
 from src.excel_helper import get_excel_download_buffer
@@ -42,8 +42,14 @@ ROUTE_LOOK_AHEAD_MAP = {
 
 def run_query(query, params=None):
     with engine.connect() as conn:
-        # Wrap the query string in text() and add bindparams
-        stmt = text(query).bindparams(expanding=True)
+        return pd.read_sql(text(query), conn, params=params)
+
+def run_query_in(query, params=None):
+    """For queries using IN :target_dates with a list value."""
+    with engine.connect() as conn:
+        stmt = text(query).bindparams(
+            bindparam("target_dates", expanding=True)
+        )
         return pd.read_sql(stmt, conn, params=params)
 
 
@@ -288,8 +294,8 @@ def export_excel():
         GROUP BY 1, 2, 3, 4, 5, 6, 7, 8, 9 ORDER BY local_time ASC, h.order_number
     """
 
-    store_prep_df = run_query(store_prep_query, params)
-    supply_df = run_query(supply_detail_query, params)
+    store_prep_df = run_query_in(store_prep_query, params)
+    supply_df = run_query_in(supply_detail_query, params)
 
     # 6. Build the clear date-range worksheet label
     if len(target_dates) > 1:
