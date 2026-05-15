@@ -1,5 +1,5 @@
 # Use an official, lightweight Python runtime
-FROM python:3.11-slim-buster
+FROM python:3.11-slim
 
 # Prevent Python from writing .pyc files and force stdout/stderr buffering to be unbuffered
 ENV PYTHONDONTWRITEBYTECODE=1
