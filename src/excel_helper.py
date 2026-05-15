@@ -65,9 +65,9 @@ def get_excel_download_buffer(df, order_df, sheet_name="AS CATERING - NEW", loca
     ws.title = sheet_name
 
     # --- HEADERS ---
-    ws.oddHeader.left.text = f"&"Times New Roman,Bold"&16{route.upper()}"
-    ws.oddHeader.right.text = f"&"Times New Roman,Bold"&16{(report_date - timedelta(days=1)).strftime('%a').upper()} for {report_date.strftime('%a').upper()}\n&"Times New Roman,Regular"&10 {report_date.strftime('%m/%d/%Y')}"
-    ws.oddHeader.center.text = f"&"Times New Roman,Bold"&16{location_name} - CATERING SUPPLIES"
+    ws.oddHeader.left.text = f"&\"Times New Roman,Bold\"&16{route.upper()}"
+    ws.oddHeader.right.text = f"&\"Times New Roman,Bold\"&16{(report_date - timedelta(days=1)).strftime('%a').upper()} for {report_date.strftime('%a').upper()}\n&"Times New Roman,Regular"&10 {report_date.strftime('%m/%d/%Y')}"
+    ws.oddHeader.center.text = f"&\"Times New Roman,Bold\"&16{location_name} - CATERING SUPPLIES"
 
     bold9, reg8, bold8 = _font(bold=True, size=9), _font(bold=False, size=8), _font(bold=True, size=8)
 
