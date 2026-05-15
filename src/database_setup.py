@@ -2,8 +2,10 @@ import os
 from sqlalchemy import create_engine, text
 from dotenv import load_dotenv
 
-# Load local .env file if present (Fallback for local HQ-PC-29 development)
 load_dotenv(override=True)
+
+# This tracking variable holds our single pool instance once created
+_db_engine = None
 
 def get_db_url():
     """Fetches database credentials uniformly from the system environment."""
@@ -13,7 +15,6 @@ def get_db_url():
     port = os.getenv('PGPORT')
     database = os.getenv('PGDATABASE')
     
-    # Simple sanity check to warn you if your environment variables didn't load
     if not all([user, password, host, port, database]):
         print("⚠️ WARNING: One or more database environment variables are missing!")
 
@@ -23,17 +24,19 @@ def get_db_url():
         f"?sslmode=require"
     )
 
-# 1. Instantiate the Engine EXACTLY ONCE globally.
-# This engine handles the connection pool across all Gunicorn threads safely.
-DATABASE_URL = get_db_url()
-db_engine = create_engine(
-    DATABASE_URL,
-    pool_size=10,           # Keep 10 connections open per worker
-    max_overflow=20,        # Allow up to 20 more during heavy reporting spikes
-    pool_recycle=300,       # Recycle connections before Azure kills idle pipes
-    pool_pre_ping=True      # Transparently reconnect if a connection drops
-)
-
 def get_db_connection():
-    """Returns the global engine asset. Flask routes will call this."""
-    return db_engine
+    """Returns the global engine asset, instantiating it lazily on first call."""
+    global _db_engine
+    
+    if _db_engine is None:
+        # This code will execute at RUNTIME on the first web request,
+        # ensuring all Azure Container Secrets are safely initialized.
+        url = get_db_url()
+        _db_engine = create_engine(
+            url,
+            pool_size=10,           
+            max_overflow=20,        
+            pool_recycle=300,       
+            pool_pre_ping=True      
+        )
+    return _db_engine
