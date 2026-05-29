@@ -1,4 +1,3 @@
-import io
 from datetime import datetime, timedelta
 from flask import Flask, render_template, request, Response
 import pandas as pd
@@ -14,31 +13,38 @@ def padding_filter(s, width=3):
     return s.rjust(width)
 
 
-# (Global Configuration Scope)
+# ─────────────────────────────────────────────
+# ROUTE CONFIGURATION
+# ─────────────────────────────────────────────
+
 ROUTE_LOOK_AHEAD_MAP = {
     "North": {
-        0: [0, 1],      # Mon export covers: Mon (0), Tue (1)
-        1: [],           # Tue export restricted
+        0: [0, 1],      # Mon export covers: Mon, Tue
+        1: [],           # Tue restricted
         2: [2, 3],      # Wed export covers: Wed, Thu
-        3: [],           # Thu export restricted
+        3: [],           # Thu restricted
         4: [4, 5, 6],   # Fri export covers: Fri, Sat, Sun
-        5: [],           # Sat export restricted
-        6: [],           # Sun export restricted
+        5: [],           # Sat restricted
+        6: [],           # Sun restricted
     },
     "South": {
-        0: [],           # Mon export restricted
+        0: [],           # Mon restricted
         1: [1, 2],      # Tue export covers: Tue, Wed
-        2: [],           # Wed export restricted
+        2: [],           # Wed restricted
         3: [3, 4],      # Thu export covers: Thu, Fri
-        4: [],           # Fri export restricted
+        4: [],           # Fri restricted
         5: [5, 6, 0],   # Sat export covers: Sat, Sun, Next Mon
-        6: [],           # Sun export restricted
+        6: [],           # Sun restricted
     },
-    "Default": {         # Fallback safety window
+    "Default": {
         0: [0, 1, 2], 1: [1, 2], 2: [2, 3], 3: [3, 4], 4: [4, 5], 5: [5, 6], 6: [6, 0]
     }
 }
 
+
+# ─────────────────────────────────────────────
+# QUERY HELPER
+# ─────────────────────────────────────────────
 
 def run_query(query, params=None):
     engine = get_db_connection()
@@ -47,37 +53,45 @@ def run_query(query, params=None):
 
 
 # ─────────────────────────────────────────────
-# CORE DATA GENERATION (Unified Grid Logic)
+# FIX 1: Lightweight location lookup
+# drill_down and export_excel use this instead
+# of calling the full build_grid_dataset() just
+# to get loc_id and route.
+# ─────────────────────────────────────────────
+
+def get_location_maps():
+    """Returns (loc_map, route_map) from the locations table directly."""
+    df = run_query("SELECT location_name, store_guid, route FROM locations")
+    loc_map   = dict(zip(df["location_name"], df["store_guid"]))
+    route_map = dict(zip(df["location_name"], df["route"]))
+    return loc_map, route_map
+
+
+# ─────────────────────────────────────────────
+# GRID DATASET (index page only)
 # ─────────────────────────────────────────────
 
 def build_grid_dataset():
     start_date = datetime.now().date() + timedelta(days=1)
-    end_date = start_date + timedelta(days=13)
-    all_dates = [start_date + timedelta(days=n) for n in range(14)]
-
-    # SCHEMA CHANGE NOTES:
-    #   - orders_head: unchanged (order_guid, location_id, estimated_fulfillment_date, deleted)
-    #   - order_checks: unchanged (order_guid, total_amount)
-    #   - locations: unchanged (location_name, store_guid, route) — kept as-is per your config
-    #
-    # location_id is VARCHAR(64) in orders_head; cast ::uuid when joining to locations.store_guid (UUID type).
+    end_date   = start_date + timedelta(days=13)
+    all_dates  = [start_date + timedelta(days=n) for n in range(14)]
 
     query = """
         SELECT
-            l.location_name                                                     AS "Location",
-            l.store_guid                                                        AS "location_id",
-            l.route                                                             AS "Route",
+            l.location_name                                                      AS "Location",
+            l.store_guid                                                         AS "location_id",
+            l.route                                                              AS "Route",
             (h.estimated_fulfillment_date AT TIME ZONE 'America/New_York')::date AS "Date",
             CASE
                 WHEN extract(hour FROM (h.estimated_fulfillment_date AT TIME ZONE 'America/New_York')) < 13
                 THEN 'AM' ELSE 'PM'
-            END                                                                 AS "DayPart",
-            count(DISTINCT h.order_guid)                                        AS "OrderCount",
+            END                                                                  AS "DayPart",
+            count(DISTINCT h.order_guid)                                         AS "OrderCount",
             sum(sum(c.total_amount)) OVER (
                 PARTITION BY
                     l.location_name,
                     (h.estimated_fulfillment_date AT TIME ZONE 'America/New_York')::date
-            )                                                                   AS "DailyTotalRevenue"
+            )                                                                    AS "DailyTotalRevenue"
         FROM orders_head h
         LEFT JOIN locations l
                ON h.location_id::uuid = l.store_guid
@@ -86,7 +100,7 @@ def build_grid_dataset():
         WHERE (h.estimated_fulfillment_date AT TIME ZONE 'America/New_York')::date
               BETWEEN :start AND :end
           AND h.deleted = FALSE
-          AND c.voided  = FALSE                          -- NEW: exclude voided checks
+          AND c.voided  = FALSE
         GROUP BY 1, 2, 3, 4, 5
     """
 
@@ -152,24 +166,18 @@ def drill_down():
     loc_name = request.args.get("location")
     date_str = request.args.get("date")
 
-    _, _, loc_map, route_map, _ = build_grid_dataset()
+    # FIX 1: lightweight lookup instead of full grid query
+    loc_map, route_map = get_location_maps()
     loc_id     = loc_map.get(loc_name)
     sel_route  = route_map.get(loc_name, "Default")
     sel_date   = datetime.strptime(date_str, "%Y-%m-%d").date()
     export_weekday = sel_date.weekday()
 
-    route_rules    = ROUTE_LOOK_AHEAD_MAP.get(sel_route, ROUTE_LOOK_AHEAD_MAP["Default"])
-    day_offsets    = route_rules.get(export_weekday, [])
+    route_rules     = ROUTE_LOOK_AHEAD_MAP.get(sel_route, ROUTE_LOOK_AHEAD_MAP["Default"])
+    day_offsets     = route_rules.get(export_weekday, [])
     export_disabled = (len(day_offsets) == 0)
 
     params = {"loc_id": str(loc_id), "sel_date": sel_date}
-
-    # SCHEMA CHANGE NOTES:
-    #   - order_checks: customer_first / customer_last unchanged
-    #   - order_items:  item_name / quantity unchanged; check_guid FK unchanged
-    #   - item_modifiers: mod_name unchanged; selection_guid FK unchanged
-    #   - dining_options: table still exists (guid / name unchanged)
-    #   - location_id is VARCHAR(64) in orders_head; cast ::uuid when joining to locations.store_guid (UUID)
 
     detail_query = """
         WITH OrderTotals AS (
@@ -180,36 +188,36 @@ def drill_down():
             JOIN order_checks c ON h.order_guid = c.order_guid
             WHERE h.location_id::uuid = :loc_id
               AND (h.estimated_fulfillment_date AT TIME ZONE 'America/New_York')::date = :sel_date
-              AND h.deleted  = FALSE
-              AND c.voided   = FALSE                         -- NEW: exclude voided checks
+              AND h.deleted = FALSE
+              AND c.voided  = FALSE
             GROUP BY h.order_guid
         )
         SELECT
             h.order_guid,
             h.order_number,
-            CONCAT_WS(' ', c.customer_first, c.customer_last)       AS customer_name,
+            CONCAT_WS(' ', c.customer_first, c.customer_last) AS customer_name,
             (h.estimated_fulfillment_date AT TIME ZONE 'America/New_York') AS local_time,
             oi.item_name,
             oi.quantity,
-            STRING_AGG(DISTINCT im.mod_name, ', ')                   AS mods,
-            ot.true_order_total                                      AS order_total,
-            od.name                                                  AS dining_option
+            STRING_AGG(DISTINCT im.mod_name, ', ')             AS mods,
+            ot.true_order_total                                AS order_total,
+            od.name                                            AS dining_option
         FROM orders_head h
         JOIN order_checks c
                ON h.order_guid = c.order_guid
         JOIN order_items oi
                ON c.check_guid = oi.check_guid
         LEFT JOIN dining_options od
-               ON h.dining_option_guid = od.guid             -- dining_options: unchanged
+               ON h.dining_option_guid::uuid = od.guid
         LEFT JOIN item_modifiers im
                ON oi.selection_guid = im.selection_guid
         JOIN OrderTotals ot
                ON h.order_guid = ot.order_guid
         WHERE h.location_id::uuid = :loc_id
           AND (h.estimated_fulfillment_date AT TIME ZONE 'America/New_York')::date = :sel_date
-          AND h.deleted  = FALSE
-          AND c.voided   = FALSE                             -- NEW: exclude voided checks
-          AND oi.voided  = FALSE                             -- NEW: exclude voided items
+          AND h.deleted = FALSE
+          AND c.voided  = FALSE
+          AND oi.voided = FALSE
         GROUP BY 1, 2, 3, 4, 5, 6, 8, 9
         ORDER BY local_time ASC
     """
@@ -253,7 +261,8 @@ def export_excel():
     loc_name = request.args.get("location")
     date_str = request.args.get("date")
 
-    _, _, loc_map, route_map, _ = build_grid_dataset()
+    # FIX 1: lightweight lookup instead of full grid query
+    loc_map, route_map = get_location_maps()
     loc_id       = loc_map.get(loc_name)
     sel_route    = route_map.get(loc_name, "Default")
     clicked_date = datetime.strptime(date_str, "%Y-%m-%d").date()
@@ -278,90 +287,78 @@ def export_excel():
     target_date_strs = [d.strftime("%Y-%m-%d") for d in target_dates]
     params = {"loc_id": str(loc_id), "target_dates": tuple(target_date_strs)}
 
-    # ─────────────────────────────────────────────────────────────────
-    # TODO: catering_pack_components has been removed from the new schema.
-    #
-    # Both queries below (store_prep_query and supply_detail_query) JOIN
-    # on catering_pack_components to map order_items.item_guid → supply
-    # items and quantities. You need to recreate or replace this table
-    # before these export queries will work.
-    #
-    # The table needs at minimum:
-    #   - item_guid      VARCHAR(64)   — matches order_items.item_guid
-    #   - supply_id      VARCHAR / INT — unique supply item identifier
-    #   - supply_name    VARCHAR       — human-readable supply label
-    #   - supply_type    VARCHAR       — category (e.g. 'Box', 'Utensils')
-    #   - quantity       NUMERIC       — units of supply per 1 ordered item
-    #
-    # Once recreated, the queries below should work without further changes.
-    # ─────────────────────────────────────────────────────────────────
-
-    # SCHEMA CHANGE NOTES (beyond the TODO above):
-    #   - location_id: VARCHAR(64) in orders_head, cast ::uuid to match locations.store_guid (UUID)
-    #   - order_checks → order_items FK path unchanged (order_guid → check_guid → selection_guid)
-    #   - dining_options: unchanged
-    #   - Added voided = FALSE filters on checks and items
-
-    store_prep_query = """
-        SELECT
-            cpc.supply_id,
-            cpc.supply_name                     AS "Supply Item",
-            cpc.supply_type                     AS "Type",
-            SUM(oi.quantity * cpc.quantity)     AS "Total Qty"
-        FROM orders_head h
-        JOIN order_checks oc
-               ON h.order_guid = oc.order_guid
-        JOIN order_items oi
-               ON oc.check_guid = oi.check_guid
-        JOIN catering_pack_components cpc       -- TODO: recreate this table (see note above)
-               ON oi.item_guid = cpc.item_guid
-        WHERE h.location_id::uuid = :loc_id
-          AND (h.estimated_fulfillment_date AT TIME ZONE 'America/New_York')::date IN :target_dates
-          AND h.deleted  = FALSE
-          AND oc.voided  = FALSE                -- NEW: exclude voided checks
-          AND oi.voided  = FALSE                -- NEW: exclude voided items
-        GROUP BY 1, 2, 3
-        ORDER BY 3, 2
-    """
-
-    supply_detail_query = """
+    # FIX 2 + 3: single query replacing the two sequential queries.
+    # The order_totals CTE is now scoped to the same location and dates
+    # as the outer query (fixes the unscoped subquery scan).
+    # Both store_prep and supply_detail data are returned together
+    # and split in Python (eliminates the second DB round trip).
+    combined_query = """
+        WITH OrderTotals AS (
+            SELECT
+                h.order_guid,
+                SUM(c.total_amount) AS true_order_total
+            FROM orders_head h
+            JOIN order_checks c ON h.order_guid = c.order_guid
+            WHERE h.location_id::uuid = :loc_id
+              AND (h.estimated_fulfillment_date AT TIME ZONE 'America/New_York')::date IN :target_dates
+              AND h.deleted = FALSE
+              AND c.voided  = FALSE
+            GROUP BY h.order_guid
+        )
         SELECT
             h.order_guid,
             h.order_number,
-            CONCAT_WS(' ', c.customer_first, c.customer_last)       AS customer_name,
+            CONCAT_WS(' ', c.customer_first, c.customer_last) AS customer_name,
             (h.estimated_fulfillment_date AT TIME ZONE 'America/New_York') AS local_time,
-            ot.true_order_total                                      AS order_total,
-            od.name                                                  AS dining_option,
+            ot.true_order_total                                AS order_total,
+            od.name                                            AS dining_option,
             cpc.supply_id,
             cpc.supply_name,
             cpc.supply_type,
-            SUM(oi.quantity * cpc.quantity)                          AS units_needed
+            oi.quantity                                        AS item_qty,
+            cpc.quantity                                       AS supply_qty,
+            (oi.quantity * cpc.quantity)                       AS units_needed
         FROM orders_head h
         JOIN order_checks c
                ON h.order_guid = c.order_guid
         JOIN order_items oi
                ON c.check_guid = oi.check_guid
-        JOIN catering_pack_components cpc       -- TODO: recreate this table (see note above)
-               ON oi.item_guid = cpc.item_guid
+        JOIN catering_pack_components cpc
+               ON oi.item_guid::uuid = cpc.item_guid
         LEFT JOIN dining_options od
-               ON h.dining_option_guid = od.guid
-        JOIN (
-            SELECT order_guid, SUM(total_amount) AS true_order_total
-            FROM order_checks
-            WHERE voided = FALSE                 -- NEW: exclude voided checks from totals
-            GROUP BY order_guid
-        ) ot ON h.order_guid = ot.order_guid
+               ON h.dining_option_guid::uuid = od.guid
+        JOIN OrderTotals ot
+               ON h.order_guid = ot.order_guid
         WHERE h.location_id::uuid = :loc_id
           AND (h.estimated_fulfillment_date AT TIME ZONE 'America/New_York')::date IN :target_dates
-          AND h.deleted  = FALSE
-          AND c.voided   = FALSE                -- NEW: exclude voided checks
-          AND oi.voided  = FALSE                -- NEW: exclude voided items
-        GROUP BY 1, 2, 3, 4, 5, 6, 7, 8, 9
+          AND h.deleted = FALSE
+          AND c.voided  = FALSE
+          AND oi.voided = FALSE
         ORDER BY local_time ASC, h.order_number
     """
 
-    store_prep_df = run_query(store_prep_query, params)
-    supply_df     = run_query(supply_detail_query, params)
+    full_df = run_query(combined_query, params)
+
+    # Split into the two dataframes get_excel_download_buffer expects
+    if not full_df.empty:
+        store_prep_df = (
+            full_df.groupby(["supply_id", "supply_name", "supply_type"], as_index=False)
+            ["units_needed"].sum()
+            .rename(columns={"supply_name": "Supply Item", "supply_type": "Type", "units_needed": "Total Qty"})
+            .sort_values(["Type", "Supply Item"])
+        )
+        supply_df = full_df[[
+            "order_guid", "order_number", "customer_name", "local_time",
+            "order_total", "dining_option", "supply_id", "supply_name",
+            "supply_type", "units_needed"
+        ]].copy()
+    else:
+        store_prep_df = pd.DataFrame(columns=["supply_id", "Supply Item", "Type", "Total Qty"])
+        supply_df     = pd.DataFrame(columns=[
+            "order_guid", "order_number", "customer_name", "local_time",
+            "order_total", "dining_option", "supply_id", "supply_name",
+            "supply_type", "units_needed"
+        ])
 
     range_label = (
         f"{target_dates[0].strftime('%m.%d')}-{target_dates[-1].strftime('%m.%d')}"
@@ -383,4 +380,4 @@ def export_excel():
 
 
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=8080)
+    app.run(host="0.0.0.0", port=8000)
