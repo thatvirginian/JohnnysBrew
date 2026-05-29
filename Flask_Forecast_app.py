@@ -71,10 +71,10 @@ def get_location_maps():
 # GRID DATASET (index page only)
 # ─────────────────────────────────────────────
 
-def build_grid_dataset():
+def build_grid_dataset(days=14):
     start_date = datetime.now().date() + timedelta(days=1)
-    end_date   = start_date + timedelta(days=13)
-    all_dates  = [start_date + timedelta(days=n) for n in range(14)]
+    end_date   = start_date + timedelta(days=days - 1)
+    all_dates  = [start_date + timedelta(days=n) for n in range(days)]
 
     query = """
         SELECT
@@ -157,8 +157,27 @@ def build_grid_dataset():
 
 @app.route("/")
 def index():
-    all_dates, matrix, _, _, daily_totals = build_grid_dataset()
-    return render_template("index.html", all_dates=all_dates, matrix=matrix, daily_totals=daily_totals)
+    days = min(max(int(request.args.get("days", 14)), 2), 14)
+    all_dates, matrix, _, route_map, daily_totals = build_grid_dataset(days=days)
+
+    # Group matrix rows by route for collapsible route headers
+    seen_routes = []
+    route_groups = {}
+    for row in matrix:
+        route = route_map.get(row["location"], "Other")
+        if route not in route_groups:
+            route_groups[route] = []
+            seen_routes.append(route)
+        route_groups[route].append(row)
+
+    return render_template(
+        "index.html",
+        all_dates=all_dates,
+        route_groups=route_groups,
+        seen_routes=seen_routes,
+        daily_totals=daily_totals,
+        days=days
+    )
 
 
 @app.route("/drill-down")
