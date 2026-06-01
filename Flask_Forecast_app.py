@@ -157,7 +157,7 @@ def build_grid_dataset(days=14):
 
 @app.route("/")
 def index():
-    days = min(max(int(request.args.get("days", 14)), 2), 14)
+    days = min(max(int(request.args.get("days", 7)), 2), 14)
     all_dates, matrix, _, route_map, daily_totals = build_grid_dataset(days=days)
 
     # Group matrix rows by route for collapsible route headers
